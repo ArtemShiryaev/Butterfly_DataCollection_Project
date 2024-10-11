@@ -1,0 +1,121 @@
+#pragma once
+
+#include <iostream>
+#include <fstream>
+#include <cmath>
+#include <string>
+
+// Constants for simulation
+double theta0 = 0;
+const double TIME_LIMIT = 70.0;  // Set your desired time limit (e.g., 70 seconds)
+const double TIME_STEP = 0.01;   // Time step for recording data (e.g., 100 Hz)
+
+// Function prototypes
+double get_torque(double theta, double dtheta, double t, double num_e, double w);
+double desiredTrajectory(double t);
+void simulate_and_save(double num_e, double w, const std::string &weight_label);
+void run_simulation(const std::string &weight_label);
+
+// Torque calculation function
+double get_torque(double theta, double dtheta, double t, double num_e, double w)
+{
+    if (theta0 == 0)
+    {
+        theta0 = theta;
+    }
+
+    // Ensure that num_e and w influence the torque dynamically
+    double tau = num_e * sin(w * t);  // num_e and w are part of the torque calculation
+    return tau;
+}
+
+// Desired trajectory function
+double desiredTrajectory(double t)
+{
+    return 2 * sin(3.6 * t) + 1 * sin(5 * t) + theta0;
+}
+
+// Function to simulate and record data for each num_e and w value
+void simulate_and_save(double num_e, double w, const std::string &weight_label)
+{
+    double t = 0.0;
+    double theta = 0.0;
+    double dtheta = 0.0;
+    double prev_theta = 0.0; // Used to calculate angular velocity (dtheta)
+
+    // Prepare filename based on num_e, w, and weight_label
+    std::string filename = "data_" + weight_label + "_num_e_" + std::to_string(num_e) + "_w_" + std::to_string(w) + ".txt";
+    std::ofstream outfile(filename);
+
+    // Ensure the file is open
+    if (!outfile)
+    {
+        std::cerr << "Error opening file: " << filename << std::endl;
+        return;
+    }
+
+    std::cout << "Saving data for num_e = " << num_e << " and w = " << w << " to: " << filename << std::endl;
+
+    // Write header for the data file
+    outfile << "Time\tTorque (tau)\tAngle (theta)\tAngular Velocity (dtheta)" << std::endl;
+
+    // Run simulation for the time limit
+    while (t <= TIME_LIMIT)
+    {
+        // Calculate torque
+        double tau = get_torque(theta, dtheta, t, num_e, w);
+
+        // Calculate angle using desired trajectory
+        theta = desiredTrajectory(t);
+
+        // Calculate angular velocity (dtheta) using finite difference (theta - previous theta)
+        dtheta = (theta - prev_theta) / TIME_STEP; // Change in angle over time step
+        prev_theta = theta; // Store current theta for next iteration
+
+        // Print data to terminal for real-time monitoring
+        std::cout << "Time: " << t << ", Torque: " << tau << ", Theta: " << theta << ", dTheta: " << dtheta << std::endl;
+
+        // Save data to file and flush immediately to ensure no buffering issues
+        outfile << t << "\t" << tau << "\t" << theta << "\t" << dtheta << std::endl;
+        outfile.flush();  // Ensure immediate write to the file
+
+        // Increment time
+        t += TIME_STEP;
+
+        // Optional: Add a condition to break the loop early if needed (e.g., for testing)
+        // if (some_condition) break;
+    }
+
+    // Close the file properly after the simulation ends
+    outfile.close();
+    std::cout << "Data saved successfully for num_e = " << num_e << " to " << filename << std::endl;
+}
+
+// Function to run the simulation for multiple num_e values
+void run_simulation(const std::string &weight_label)
+{
+    // Loop over num_e values from 3 to 15 and a fixed w
+    double w = 13.0; // For now, w is fixed, but you can vary it later if needed
+    
+    for (double num_e = 3.0; num_e <= 15.0; )
+    {
+        std::cout << "Running simulation for num_e = " << num_e << " and w = " << w << std::endl;
+
+        // Simulate and save data for the current num_e value
+        simulate_and_save(num_e, w, weight_label);
+
+        // Increment num_e: 0.5 step until 8, then 1.0 step after
+        if (num_e < 8.0)
+        {
+            num_e += 0.5;
+        }
+        else
+        {
+            num_e += 1.0;
+        }
+
+        std::cout << "Completed simulation for num_e = " << num_e << std::endl;
+    }
+
+    std::cout << "All simulations completed and data saved." << std::endl;
+}
