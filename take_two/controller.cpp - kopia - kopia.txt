@@ -1,0 +1,87 @@
+#include <cppmisc/traces.h>
+#include <cppmisc/argparse.h>
+#include <cppmisc/signals.h>
+#include "butterfly.h"
+#include "controller.h"
+
+using namespace std;
+
+int launch(Json::Value const& jscfg, double num_e, double w)
+{
+    Butterfly bfly;
+    bfly.init(jscfg);
+    bool stop = false;
+    auto stop_handler = [&stop, &bfly]() { stop = true; bfly.stop(); };
+    SysSignals::instance().set_sigint_handler(stop_handler);
+    SysSignals::instance().set_sigterm_handler(stop_handler);
+
+    // Controller function
+    auto f = [num_e, w](BflySignals& signals) {
+        if (signals.t < 0.1)
+            return true;
+
+        auto n = int(floor(signals.theta / _PI));
+        double theta = signals.theta - _PI * n;
+
+        // Restore the previously working control law
+        signals.torque = 2 * ((_PI / 2 + sin(1.2 * signals.t)) - theta) + 0.1 * (1.2 * cos(1.2 * signals.t) - signals.dtheta);
+        
+        // Clamp torque between -0.1 and 0.1 (as per the original)
+        signals.torque = clamp(signals.torque, -0.1, 0.1);
+
+        // Output feedback for debugging
+        info_msg(",", signals.t, ",", signals.torque, ",", signals.theta, ",", signals.dtheta);
+
+        return true;
+    };
+
+    bfly.start(f);
+    return 0;
+}
+
+int main(int argc, char const* argv[])
+{
+    make_arg_list args({
+        {{"-c", "--config"}, "config", "path to json config file", "", true}
+    });
+
+    int status = 0;
+
+    try
+    {
+        auto&& m = args.parse(argc, argv);
+        Json::Value const& cfg = json_load(m["config"]);
+        traces::init(json_get(cfg, "traces"));
+
+        // Simulation loop with dynamic num_e and w
+        double w = 13.0;
+        for (double num_e = 3.0; num_e <= 15.0; )
+        {
+            cout << "Launching with num_e = " << num_e << " and w = " << w << endl;
+            launch(cfg, num_e, w);
+            
+            if (num_e < 8.0)
+            {
+                num_e += 0.5;
+            }
+            else
+            {
+                num_e += 1.0;
+            }
+
+            cout << "Completed simulation for num_e = " << num_e << endl;
+        }
+    }
+    catch (exception const& e)
+    {
+        err_msg(e.what());
+        status = -1;
+    }
+    catch (...)
+    {
+        err_msg("Unknown error occurred");
+        status = -1;
+    }
+
+    return status;
+}
