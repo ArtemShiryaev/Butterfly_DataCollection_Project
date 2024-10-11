@@ -1,0 +1,97 @@
+#include <cppmisc/traces.h>
+#include <cppmisc/argparse.h>
+#include <cppmisc/signals.h>
+#include "butterfly.h"
+#include "controller.h"  // Include your controller.h file with the modified simulate_and_save function
+
+using namespace std;
+
+// The main function to run your simulation and create individual txt files for each run
+int launch(Json::Value const& jscfg, double num_e, double w)
+{
+    Butterfly bfly;
+    bfly.init(jscfg);
+    bool stop = false;
+    auto stop_handler = [&stop, &bfly]() { stop = true; bfly.stop(); };
+    SysSignals::instance().set_sigint_handler(stop_handler);
+    SysSignals::instance().set_sigterm_handler(stop_handler);
+
+    // Controller function (real-time control can happen here)
+    auto f = [num_e, w](BflySignals& signals) {
+        if (signals.t < 0.1)
+            return true;
+
+        auto n = int(floor(signals.theta / _PI));
+        double theta = signals.theta - _PI * n;
+
+        // Calculate torque based on num_e and w
+        signals.torque = get_torque(theta, signals.dtheta, signals.t, num_e, w);  
+        
+        // Clamp torque between -0.1 and 0.1 for safety
+        signals.torque = clamp(signals.torque, -0.1, 0.1);
+
+        // Output real-time information
+        info_msg(",", signals.t, ",", signals.torque, ",", signals.theta, ",", signals.dtheta);
+
+        return true;
+    };
+
+    // Start running the simulation
+    bfly.start(f);
+
+    // After finishing the simulation, call simulate_and_save to generate the .txt file
+    std::string weight_label = "55g";  // Adjust the weight label as necessary
+    simulate_and_save(num_e, w, weight_label);  // Save results for each num_e
+
+    return 0;
+}
+
+int main(int argc, char const* argv[])
+{
+    make_arg_list args({
+        {{"-c", "--config"}, "config", "path to json config file", "", true}
+    });
+
+    int status = 0;
+
+    try
+    {
+        auto&& m = args.parse(argc, argv);
+        Json::Value const& cfg = json_load(m["config"]);
+        traces::init(json_get(cfg, "traces"));
+
+        // Simulation loop to generate different txt files for each num_e and w
+        double w = 13.0;  // Default w for now
+        for (double num_e = 3.0; num_e <= 15.0; )
+        {
+            cout << "Launching with num_e = " << num_e << " and w = " << w << endl;
+
+            // Call the launch function to run the simulation and save the results
+            launch(cfg, num_e, w);
+            
+            // Increment num_e for the next run
+            if (num_e < 8.0)
+            {
+                num_e += 0.5;  // Increment by 0.5 until num_e reaches 8
+            }
+            else
+            {
+                num_e += 1.0;  // Increment by 1.0 after num_e reaches 8
+            }
+
+            cout << "Completed simulation for num_e = " << num_e << endl;
+        }
+    }
+    catch (exception const& e)
+    {
+        err_msg(e.what());
+        status = -1;
+    }
+    catch (...)
+    {
+        err_msg("Unknown error occurred");
+        status = -1;
+    }
+
+    return status;
+}
